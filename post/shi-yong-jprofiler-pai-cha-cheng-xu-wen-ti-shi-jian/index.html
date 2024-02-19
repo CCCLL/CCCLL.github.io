@@ -1,0 +1,236 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>使用JProfiler排查程序问题实践 | CCCLL</title>
+<link rel="shortcut icon" href="https://CCCLL.github.io/favicon.ico?v=1708259315153">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@2.3.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="https://CCCLL.github.io/styles/main.css">
+<link rel="alternate" type="application/atom+xml" title="使用JProfiler排查程序问题实践 | CCCLL - Atom Feed" href="https://CCCLL.github.io/atom.xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Serif:400,700">
+
+
+
+    <meta name="description" content="基础
+
+Retained size
+对象的保留大小（Retained size）是其浅层大小加上只能从该对象直接或间接访问的对象的浅层大小。换句话说，保留大小表示当收集该对象时垃圾收集器将释放的内存量。
+Shallow size 
+对象的浅..." />
+    <meta name="keywords" content="" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.1/build/highlight.min.js"></script>
+  </head>
+  <body>
+    <div class="main">
+      <div class="main-content">
+        <div class="site-header">
+  <a href="https://CCCLL.github.io">
+  <img class="avatar" src="https://CCCLL.github.io/images/avatar.png?v=1708259315153" alt="">
+  </a>
+  <h1 class="site-title">
+    CCCLL
+  </h1>
+  <p class="site-description">
+    
+  </p>
+  <div class="menu-container">
+    
+      
+        <a href="/" class="menu">
+          首页
+        </a>
+      
+    
+      
+        <a href="/archives" class="menu">
+          归档
+        </a>
+      
+    
+      
+        <a href="/tags" class="menu">
+          标签
+        </a>
+      
+    
+      
+        <a href="/post/about" class="menu">
+          关于
+        </a>
+      
+    
+  </div>
+  <div class="social-container">
+    
+      
+    
+      
+    
+      
+    
+      
+    
+      
+    
+  </div>
+</div>
+
+        <div class="post-detail">
+          <article class="post">
+            <h2 class="post-title">
+              使用JProfiler排查程序问题实践
+            </h2>
+            <div class="post-info">
+              <span>
+                2024-01-28
+              </span>
+              <span>
+                3 min read
+              </span>
+              
+            </div>
+            
+            <div class="post-content-wrapper">
+              <div class="post-content" v-pre>
+                <h2 id="基础">基础</h2>
+<figure data-type="image" tabindex="1"><img src="https://CCCLL.github.io/post-images/1706415637854.png" alt="" loading="lazy"></figure>
+<p><strong>Retained size</strong><br>
+对象的保留大小（<strong>Retained size</strong>）是其浅层大小加上只能从该对象直接或间接访问的对象的浅层大小。换句话说，保留大小表示当收集该对象时垃圾收集器将释放的内存量。<br>
+<strong>Shallow size</strong> <br>
+对象的浅层大小（<strong>Shallow size</strong>）是分配用于存储对象本身的内存量，不考虑引用的对象。常规（非数组）对象的浅层大小取决于其字段的数量和类型。数组的浅层大小取决于数组长度及其元素的类型（对象、基本类型）。一组对象的浅层大小表示该组中所有对象的浅层大小之和。</p>
+<h3 id="outgoing-references">Outgoing references</h3>
+<figure data-type="image" tabindex="2"><img src="https://CCCLL.github.io/post-images/1706963743640.png" alt="" loading="lazy"></figure>
+<p>Outgoing references 表示：展示此对象的字段引用的对象。</p>
+<h3 id="incoming-references">Incoming references</h3>
+<figure data-type="image" tabindex="3"><img src="https://CCCLL.github.io/post-images/1706963788356.png" alt="" loading="lazy"></figure>
+<p>Incoming references 表示：展示引用了此对象的对象。</p>
+<h2 id="查找类实例对象">查找类实例对象</h2>
+<h3 id="根据类名搜索">根据类名搜索</h3>
+<figure data-type="image" tabindex="4"><img src="https://CCCLL.github.io/post-images/1706963950173.png" alt="" loading="lazy"></figure>
+<h3 id="实例对象筛选">实例对象筛选</h3>
+<p>如果某个类的实例对象有很多，比如Map类中的Entry对象、Session对象、用户对象等。我们要排查问题时要找到指定的实例对象，来查看指定对象里成员变量的详细值。只用类名筛选实例对象太多，较难找到。可使用实例对象中字符串成员变量，进而找到指定实例对象。例如Entry对象的key、Session对象的session id，用户对象的用户名等。</p>
+<p>1、首先搜索String类，双击java.lang.String进入字符串类对象的集合<br>
+<img src="https://CCCLL.github.io/post-images/1706964158819.png" alt="" loading="lazy"><br>
+<img src="https://CCCLL.github.io/post-images/1706964262232.png" alt="" loading="lazy"></p>
+<p>2、使用Apply filter 的 By restricting the selected value 选项<br>
+<img src="https://CCCLL.github.io/post-images/1706964335632.png" alt="" loading="lazy"><br>
+<img src="https://CCCLL.github.io/post-images/1706964376223.png" alt="" loading="lazy"></p>
+<p>3、使用 The result of the toString(method satisfies the condition:  功能<br>
+<img src="https://CCCLL.github.io/post-images/1706964410931.png" alt="" loading="lazy"></p>
+<p>4、字符串匹配方式有包含、头匹配、尾匹配、正则表达式匹配，还可选择是否忽略大小写<br>
+<img src="https://CCCLL.github.io/post-images/1706964444138.png" alt="" loading="lazy"></p>
+<p>5、输入要查找的字符串对象的值（目的是找到spacex.select.local这个字符串对应的SpacexProperty对象，查看SpacexProperty对象的value成员变量的值），对应的类代码如下<br>
+<img src="https://CCCLL.github.io/post-images/1706964609344.png" alt="" loading="lazy"><br>
+<img src="https://CCCLL.github.io/post-images/1706964635983.png" alt="" loading="lazy"></p>
+<p>6、Outgoing references表示此字符串对象持有的成员变量，需改成Incoming references表示持有此字符串对象的实例对象<br>
+<img src="https://CCCLL.github.io/post-images/1706964672311.png" alt="" loading="lazy"><br>
+<img src="https://CCCLL.github.io/post-images/1706964766044.png" alt="" loading="lazy"></p>
+<p>7、我们在这里就找到了spacex.select.local这个字符串对应的SpacexProperty对象<br>
+<img src="https://CCCLL.github.io/post-images/1706964892690.png" alt="" loading="lazy"></p>
+<p>8、我们右击此对象，选择Use Selected Objects<br>
+<img src="https://CCCLL.github.io/post-images/1706964970937.png" alt="" loading="lazy"></p>
+<p>9、选择Use Selected Objects后，并将查看模式改为Outgoing references，就可以看到此配置的值<br>
+<img src="https://CCCLL.github.io/post-images/1706965069110.png" alt="" loading="lazy"></p>
+<h2 id="查看实例对象的静态成员变量">查看实例对象的静态成员变量</h2>
+<p>1、首先找到指定的实例对象，使用类名搜索<br>
+<img src="https://CCCLL.github.io/post-images/1706965180300.png" alt="" loading="lazy"></p>
+<p>2、找到指定实例后，右键选择Use Selected java.lang.Class Objects<br>
+<img src="https://CCCLL.github.io/post-images/1706965244804.png" alt="" loading="lazy"></p>
+<p>3、即可查看此实例静态对象详情<br>
+<img src="https://CCCLL.github.io/post-images/1706965322925.png" alt="" loading="lazy"><br>
+实例对应类的代码如下<br>
+<img src="https://CCCLL.github.io/post-images/1706965386474.png" alt="" loading="lazy"></p>
+
+              </div>
+              <div class="toc-container">
+                <ul class="markdownIt-TOC">
+<li>
+<ul>
+<li><a href="#%E5%9F%BA%E7%A1%80">基础</a>
+<ul>
+<li><a href="#outgoing-references">Outgoing references</a></li>
+<li><a href="#incoming-references">Incoming references</a></li>
+</ul>
+</li>
+<li><a href="#%E6%9F%A5%E6%89%BE%E7%B1%BB%E5%AE%9E%E4%BE%8B%E5%AF%B9%E8%B1%A1">查找类实例对象</a>
+<ul>
+<li><a href="#%E6%A0%B9%E6%8D%AE%E7%B1%BB%E5%90%8D%E6%90%9C%E7%B4%A2">根据类名搜索</a></li>
+<li><a href="#%E5%AE%9E%E4%BE%8B%E5%AF%B9%E8%B1%A1%E7%AD%9B%E9%80%89">实例对象筛选</a></li>
+</ul>
+</li>
+<li><a href="#%E6%9F%A5%E7%9C%8B%E5%AE%9E%E4%BE%8B%E5%AF%B9%E8%B1%A1%E7%9A%84%E9%9D%99%E6%80%81%E6%88%90%E5%91%98%E5%8F%98%E9%87%8F">查看实例对象的静态成员变量</a></li>
+</ul>
+</li>
+</ul>
+
+              </div>
+            </div>
+          </article>
+        </div>
+
+        
+          <div class="next-post">
+            <div class="next">下一篇</div>
+            <a href="https://CCCLL.github.io/post/guan-yu-git-rebase-he-git-merge/">
+              <h3 class="post-title">
+                关于git rebase和git merge
+              </h3>
+            </a>
+          </div>
+        
+
+        
+
+        <div class="site-footer">
+  
+  <a class="rss" href="https://CCCLL.github.io/atom.xml" target="_blank">
+    <i class="ri-rss-line"></i> RSS
+  </a>
+</div>
+
+      </div>
+    </div>
+
+    <script>
+      hljs.initHighlightingOnLoad()
+
+      let mainNavLinks = document.querySelectorAll(".markdownIt-TOC a");
+
+      // This should probably be throttled.
+      // Especially because it triggers during smooth scrolling.
+      // https://lodash.com/docs/4.17.10#throttle
+      // You could do like...
+      // window.addEventListener("scroll", () => {
+      //    _.throttle(doThatStuff, 100);
+      // });
+      // Only not doing it here to keep this Pen dependency-free.
+
+      window.addEventListener("scroll", event => {
+        let fromTop = window.scrollY;
+
+        mainNavLinks.forEach((link, index) => {
+          let section = document.getElementById(decodeURI(link.hash).substring(1));
+          let nextSection = null
+          if (mainNavLinks[index + 1]) {
+            nextSection = document.getElementById(decodeURI(mainNavLinks[index + 1].hash).substring(1));
+          }
+          if (section.offsetTop <= fromTop) {
+            if (nextSection) {
+              if (nextSection.offsetTop > fromTop) {
+                link.classList.add("current");
+              } else {
+                link.classList.remove("current");    
+              }
+            } else {
+              link.classList.add("current");
+            }
+          } else {
+            link.classList.remove("current");
+          }
+        });
+      });
+
+    </script>
+  </body>
+</html>

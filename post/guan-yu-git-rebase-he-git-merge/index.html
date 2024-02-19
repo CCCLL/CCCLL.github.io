@@ -1,0 +1,240 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>关于git rebase和git merge | CCCLL</title>
+<link rel="shortcut icon" href="https://CCCLL.github.io/favicon.ico?v=1708259315153">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@2.3.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="https://CCCLL.github.io/styles/main.css">
+<link rel="alternate" type="application/atom+xml" title="关于git rebase和git merge | CCCLL - Atom Feed" href="https://CCCLL.github.io/atom.xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Serif:400,700">
+
+
+
+    <meta name="description" content="场景：从a分支的a1节点checkout出一个新分支b，然后在b分支上进行了多次修改、新增的commit。与此同时a分支也进行了多次修改、新增的commit。现在想把b分支上的修改和新增合并到a分支上，应该怎么操作？
+          b..." />
+    <meta name="keywords" content="" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.1/build/highlight.min.js"></script>
+  </head>
+  <body>
+    <div class="main">
+      <div class="main-content">
+        <div class="site-header">
+  <a href="https://CCCLL.github.io">
+  <img class="avatar" src="https://CCCLL.github.io/images/avatar.png?v=1708259315153" alt="">
+  </a>
+  <h1 class="site-title">
+    CCCLL
+  </h1>
+  <p class="site-description">
+    
+  </p>
+  <div class="menu-container">
+    
+      
+        <a href="/" class="menu">
+          首页
+        </a>
+      
+    
+      
+        <a href="/archives" class="menu">
+          归档
+        </a>
+      
+    
+      
+        <a href="/tags" class="menu">
+          标签
+        </a>
+      
+    
+      
+        <a href="/post/about" class="menu">
+          关于
+        </a>
+      
+    
+  </div>
+  <div class="social-container">
+    
+      
+    
+      
+    
+      
+    
+      
+    
+      
+    
+  </div>
+</div>
+
+        <div class="post-detail">
+          <article class="post">
+            <h2 class="post-title">
+              关于git rebase和git merge
+            </h2>
+            <div class="post-info">
+              <span>
+                2024-01-22
+              </span>
+              <span>
+                5 min read
+              </span>
+              
+            </div>
+            
+            <div class="post-content-wrapper">
+              <div class="post-content" v-pre>
+                <p>场景：从a分支的a1节点checkout出一个新分支b，然后在b分支上进行了多次修改、新增的commit。与此同时a分支也进行了多次修改、新增的commit。现在想把b分支上的修改和新增合并到a分支上，应该怎么操作？</p>
+<pre><code>          b1---b2---b3---b4---b5 b
+         /
+    a0---a1---a2---a3---a4---a5---a6---a7 a
+</code></pre>
+<p>你可以使用 <strong><code>git rebase</code></strong> 或 <strong><code>git merge</code></strong> 将分支 <code>b</code> 上的commit合并到分支 <code>a</code> 上。下面是两种方法的步骤：</p>
+<h2 id="合并代码"><strong>合并代码</strong></h2>
+<h3 id="方法一使用-git-rebase推荐"><strong>方法一：使用 <code>git rebase</code>（推荐）</strong></h3>
+<ol>
+<li>
+<p><strong>切换到分支 <code>a</code>：</strong></p>
+<pre><code class="language-bash">git checkout a
+</code></pre>
+</li>
+<li>
+<p><strong>执行 rebase 操作：</strong></p>
+<pre><code class="language-bash">git rebase b
+</code></pre>
+<p>这将会将分支 <code>a</code> 上的修改应用到分支 <code>b</code> 上，然后将分支 <code>b</code> 上的修改逐个应用到分支 <code>a</code> 上。在这个过程中，如果有冲突，你需要解决冲突并继续 rebase。</p>
+</li>
+<li>
+<p><strong>（可选）推送更新到远程仓库：</strong></p>
+<p>如果分支 <code>a</code>有对应的远程分支，需要使用强制推送：</p>
+<p><code>git rebase</code> 能确保提交历史的清晰，但在 <code>git push</code> 时可能会遇到一些问题，因为你的本地分支已经和远程分支的历史不一致了。简单来说，你的本地分支&quot;领先&quot;了远程分支。因此，我们不能像平常那样直接git push，需要使用以下命令：</p>
+<pre><code class="language-bash">git push -f origin your_branch_name
+</code></pre>
+<p>这里的 <code>-f</code> 或 <code>--force</code> 参数会强制推送你的本地分支到远程，即使它会导致远程仓库的提交历史改变。</p>
+<p>但请注意，<code>--force</code> 选项会覆盖远程仓库上的所有更改，所以只有当你确保没有其他人在这个分支上工作，或者其他人已经知道你要这么做，并且保存了他们的更改在别的地方的情况下，才使用这个命令。知道什么时候使用 <code>--force</code> 这个选项，是一个重要的版本控制技能。</p>
+<h3 id="方法二使用-git-merge"><strong>方法二：使用 <code>git merge</code></strong></h3>
+<ol>
+<li>
+<p><strong>切换到分支 <code>a</code>：</strong></p>
+<pre><code class="language-bash">git checkout a
+</code></pre>
+</li>
+<li>
+<p><strong>执行 merge 操作：</strong></p>
+<pre><code class="language-bash">git merge b
+</code></pre>
+<p>这将会将分支 <strong><code>b</code></strong> 上的修改合并到分支 <strong><code>a</code></strong> 上。如果有冲突，你需要解决冲突并commit你的合并修改，完成合并。</p>
+</li>
+<li>
+<p><strong>（可选）推送更新到远程仓库：</strong></p>
+<p>如果分支 <strong><code>a</code></strong> 是已经推送到远程仓库的分支，你可能需要推送更新（和**<code>rebase</code>**不同的是，这里不需要强制推送）：</p>
+<pre><code class="language-bash">git push origin a
+</code></pre>
+</li>
+</ol>
+<p>选择使用 <strong><code>git rebase</code></strong> 还是 <strong><code>git merge</code></strong> 取决于你的团队工作流和个人偏好。<strong><code>git rebase</code></strong> 会产生一个更线性的提交历史，而 <strong><code>git merge</code></strong> 保留了每个分支上的独立提交。</p>
+<h2 id="使用git-merge和git-rebase遇到的问题"><strong>使用<code>git merge</code>和<code>git rebase</code>遇到的问题</strong></h2>
+<p>如果 git rebase 和 git merge都使用过的话，会发现使用git rebase比使用git merge，需要更多次的冲突合并，这是什么原因那？</p>
+<p><code>git rebase</code> 产生更多的冲突的原因有几个：</p>
+<ol>
+<li>
+<p><strong>Reapply 修改：</strong></p>
+<p><code>git rebase</code> 是通过逐个重新应用提交来进行的，而 <code>git merge</code> 是通过创建一个新的合并提交来整合两个分支的更改。在 <code>rebase</code> 过程中，每个提交都可能导致冲突，而在 <code>merge</code> 过程中，只有一个合并提交需要解决冲突。</p>
+</li>
+<li>
+<p><strong>线性提交历史：</strong></p>
+<p><code>git rebase</code> 生成的提交历史是线性的，每个提交都构建在前一个提交之上。这意味着如果有多个分支同时在目标分支上进行 <code>rebase</code>，可能会有更多的冲突需要解决，因为每个提交都可能与目标分支的最新提交发生冲突。</p>
+</li>
+<li>
+<p><strong>历史分叉的影响：</strong></p>
+<p>如果分支 <code>a</code> 和分支 <code>b</code> 基于相同的父提交，并且两者都进行了多次修改，当你尝试将分支 <code>b</code> 上的修改通过 <code>rebase</code> 应用到分支 <code>a</code> 时，可能会导致较早的提交已经包含了在分支 <code>b</code> 上进行的某些修改，从而引发冲突。</p>
+</li>
+</ol>
+<h2 id="总结"><strong>总结</strong></h2>
+<p>尽管 <code>git rebase</code> 可能会产生更多的冲突，但它有助于保持提交历史的线性和整洁。不过如果两个分支之间差别的commit较多，个人推荐使用<code>git merge</code>，因为<code>git rebase</code> 针对多次commit的多次冲突解决，很有可能因疏忽大意导致合并结果不正确，而<code>git merge</code>只需一次冲突解决，降低人为因素导致错误的概率。</p>
+</li>
+</ol>
+
+              </div>
+              <div class="toc-container">
+                <ul class="markdownIt-TOC">
+<li>
+<ul>
+<li><a href="#%E5%90%88%E5%B9%B6%E4%BB%A3%E7%A0%81"><strong>合并代码</strong></a>
+<ul>
+<li><a href="#%E6%96%B9%E6%B3%95%E4%B8%80%E4%BD%BF%E7%94%A8-git-rebase%E6%8E%A8%E8%8D%90"><strong>方法一：使用 <code>git rebase</code>（推荐）</strong></a></li>
+<li><a href="#%E6%96%B9%E6%B3%95%E4%BA%8C%E4%BD%BF%E7%94%A8-git-merge"><strong>方法二：使用 <code>git merge</code></strong></a></li>
+</ul>
+</li>
+<li><a href="#%E4%BD%BF%E7%94%A8git-merge%E5%92%8Cgit-rebase%E9%81%87%E5%88%B0%E7%9A%84%E9%97%AE%E9%A2%98"><strong>使用<code>git merge</code>和<code>git rebase</code>遇到的问题</strong></a></li>
+<li><a href="#%E6%80%BB%E7%BB%93"><strong>总结</strong></a></li>
+</ul>
+</li>
+</ul>
+
+              </div>
+            </div>
+          </article>
+        </div>
+
+        
+
+        
+
+        <div class="site-footer">
+  
+  <a class="rss" href="https://CCCLL.github.io/atom.xml" target="_blank">
+    <i class="ri-rss-line"></i> RSS
+  </a>
+</div>
+
+      </div>
+    </div>
+
+    <script>
+      hljs.initHighlightingOnLoad()
+
+      let mainNavLinks = document.querySelectorAll(".markdownIt-TOC a");
+
+      // This should probably be throttled.
+      // Especially because it triggers during smooth scrolling.
+      // https://lodash.com/docs/4.17.10#throttle
+      // You could do like...
+      // window.addEventListener("scroll", () => {
+      //    _.throttle(doThatStuff, 100);
+      // });
+      // Only not doing it here to keep this Pen dependency-free.
+
+      window.addEventListener("scroll", event => {
+        let fromTop = window.scrollY;
+
+        mainNavLinks.forEach((link, index) => {
+          let section = document.getElementById(decodeURI(link.hash).substring(1));
+          let nextSection = null
+          if (mainNavLinks[index + 1]) {
+            nextSection = document.getElementById(decodeURI(mainNavLinks[index + 1].hash).substring(1));
+          }
+          if (section.offsetTop <= fromTop) {
+            if (nextSection) {
+              if (nextSection.offsetTop > fromTop) {
+                link.classList.add("current");
+              } else {
+                link.classList.remove("current");    
+              }
+            } else {
+              link.classList.add("current");
+            }
+          } else {
+            link.classList.remove("current");
+          }
+        });
+      });
+
+    </script>
+  </body>
+</html>

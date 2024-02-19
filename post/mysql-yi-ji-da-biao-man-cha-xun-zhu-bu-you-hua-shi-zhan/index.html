@@ -1,0 +1,600 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MySQL亿级大表慢查询逐步优化实战 | CCCLL</title>
+<link rel="shortcut icon" href="https://CCCLL.github.io/favicon.ico?v=1708259315153">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@2.3.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="https://CCCLL.github.io/styles/main.css">
+<link rel="alternate" type="application/atom+xml" title="MySQL亿级大表慢查询逐步优化实战 | CCCLL - Atom Feed" href="https://CCCLL.github.io/atom.xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Serif:400,700">
+
+
+
+    <meta name="description" content="背景：物联网相关项目。设备对OpenAPI每次的调用情况记录到了MySQL中，在控制台页面做了展示，可根据调用时间的范围（必选条件）、设备ID、API名称等作为条件筛选展示，主要用途是便于排障。
+问题：客户设备数据量较多，造成OpenAPI..." />
+    <meta name="keywords" content="" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.1/build/highlight.min.js"></script>
+  </head>
+  <body>
+    <div class="main">
+      <div class="main-content">
+        <div class="site-header">
+  <a href="https://CCCLL.github.io">
+  <img class="avatar" src="https://CCCLL.github.io/images/avatar.png?v=1708259315153" alt="">
+  </a>
+  <h1 class="site-title">
+    CCCLL
+  </h1>
+  <p class="site-description">
+    
+  </p>
+  <div class="menu-container">
+    
+      
+        <a href="/" class="menu">
+          首页
+        </a>
+      
+    
+      
+        <a href="/archives" class="menu">
+          归档
+        </a>
+      
+    
+      
+        <a href="/tags" class="menu">
+          标签
+        </a>
+      
+    
+      
+        <a href="/post/about" class="menu">
+          关于
+        </a>
+      
+    
+  </div>
+  <div class="social-container">
+    
+      
+    
+      
+    
+      
+    
+      
+    
+      
+    
+  </div>
+</div>
+
+        <div class="post-detail">
+          <article class="post">
+            <h2 class="post-title">
+              MySQL亿级大表慢查询逐步优化实战
+            </h2>
+            <div class="post-info">
+              <span>
+                2024-02-04
+              </span>
+              <span>
+                16 min read
+              </span>
+              
+            </div>
+            
+            <div class="post-content-wrapper">
+              <div class="post-content" v-pre>
+                <p><strong>背景</strong>：物联网相关项目。设备对OpenAPI每次的调用情况记录到了MySQL中，在控制台页面做了展示，可根据调用时间的范围（必选条件）、设备ID、API名称等作为条件筛选展示，主要用途是便于排障。</p>
+<p><strong>问题</strong>：客户设备数据量较多，造成OpenAPI调用记录表太大，查询很慢，甚至直接卡死。尽管运维同事使用脚本定时删除此表的数据，只保留近一月的数据，一月数据量仍然有三亿多条，还是存在问题。</p>
+<p>因为是从前同事手里接手的项目，先看了下程序代码没什么大问题。接下来再看下项目的表结构和SQL有什么可以优化的地方。</p>
+<h2 id="第一步-sql和表结构优化">第一步、SQL和表结构优化</h2>
+<h3 id="sql优化">SQL优化</h3>
+<p><strong>OpenAPI调用记录表现状结构</strong></p>
+<pre><code class="language-sql">CREATE TABLE `openapi_log` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `api` varchar(255) NOT NULL DEFAULT '',
+  `device_id` varchar(100) DEFAULT '',
+  `device_type` varchar(100) DEFAULT '',
+  `param` varchar(2048) DEFAULT NULL,
+  `result` tinyint(4) NOT NULL,
+  `call_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `exec_time` bigint(20) NOT NULL,
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_calltime_api` (`call_time`,`api`),
+  KEY `idx_calltime_deviceid` (`call_time`,`device_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+</code></pre>
+<p><strong>OpenAPI调用记录表现状查询SQL</strong></p>
+<pre><code class="language-xml">&lt;select id=&quot;query&quot; resultMap=&quot;BaseResultMap&quot;&gt;
+    select
+    log.id, log.device_id, log.api, log.param, log.result,log.call_time, log.exec_time,log.create_time,log.update_time
+    from openapi_log log
+    inner join (select id from openapi_log
+    &lt;include refid=&quot;filterSql&quot;/&gt;
+    order by call_time desc
+    &lt;if test=&quot;limit!=null and skip!=null&quot;&gt;
+      limit #{skip},#{limit}
+    &lt;/if&gt;
+     ) temp on log.id=temp.id
+&lt;/select&gt;
+
+
+  &lt;sql id=&quot;filterSql&quot;&gt;
+    &lt;if test=&quot;filter!=null&quot;&gt;
+      &lt;where&gt;
+        &lt;if test=&quot;filter.deviceId!=null&quot;&gt;
+          and device_id =#{filter.device_id}
+        &lt;/if&gt;
+        &lt;if test=&quot;filter.api!=null&quot;&gt;
+          and api=#{filter.api}
+        &lt;/if&gt;
+        &lt;if test=&quot;filter.callTimeGte!=null and filter.callTimeLte!=null&quot;&gt;
+          and call_time &gt;=#{filter.callTimeGte} and call_time &amp;lt;= #{filter.callTimeLte}
+        &lt;/if&gt;
+      &lt;/where&gt;
+    &lt;/if&gt;
+  &lt;/sql&gt;
+</code></pre>
+<p>可以看到上述SQL使用到了子查询，估计前同事是看了阿里巴巴《Java开发手册》中的推荐，见下图<br>
+<img src="https://CCCLL.github.io/post-images/1708250444461.png" alt="" loading="lazy"></p>
+<p>但是此优化是针对深度分页的状况，在此功能的场景上基本不会深度分页，<strong>非深度分页的状况下，此优化是负优化</strong>。如果项目会有深度分页情形，可在代码层面做判断，深度分页走子查询优化SQL，非深度分页则不走子查询。</p>
+<p>以下是测试对比，同样的数据量、非深度分页状况下，分别用了原SQL和去掉子查询的SQL查询详细消耗情况</p>
+<p><strong>现状代码SQL 1</strong></p>
+<pre><code class="language-sql">select
+    log.id, log.device_id, log.api, log.param, log.result,log.call_time, log.exec_time,log.create_time,log.update_time
+    from openapi_log log
+    inner join (select id from openapi_log_test
+    	where
+        call_time &gt;= '2026-11-10 10:00:00.000' AND call_time &lt;= '2026-11-10 12:00:00.000'
+    	order by call_time desc limit 50,50
+     ) temp on log.id=temp.id;
+</code></pre>
+<p><strong>去掉子查询SQL 2</strong></p>
+<pre><code class="language-sql">SELECT
+    log.id, log.device_id, log.api, log.param, log.result, log.call_time, log.exec_time, log.create_time, log.update_time
+FROM
+    openapi_log log
+WHERE
+    log.call_time &gt;= '2026-11-10 10:00:00.000' AND log.call_time &lt;= '2026-11-10 12:00:00.000'
+
+ORDER BY log.call_time DESC
+LIMIT 50, 50;
+</code></pre>
+<p><strong>1号框为原代码SQL，2号框为去掉子查询后的SQL，可以看到去掉子查询后的SQL查询时间减少 30%。</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250542494.png" alt="" loading="lazy"></p>
+<p><strong>原代码SQL的详细时间消耗情况</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250559663.png" alt="" loading="lazy"></p>
+<p><strong>去掉子查询SQL的详细时间消耗情况</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250770189.png" alt="" loading="lazy"></p>
+<p><strong>结论</strong>：SQL优化后查询时间减少大约30%。经对比可看出由于原代码使用了子查询产生了临时表，所以多了removing tmp table步骤，并且一些步骤需要做两遍，如checking permissions、optimizing、preparing、Sending data等。</p>
+<h3 id="表结构优化">表结构优化</h3>
+<p>从上文的表结构中可以看到，OpenAPI调用记录表的两个索引都是联合索引，idx_calltime_api和idx_calltime_deviceid。但是考虑到call_time和device_id的离散程度本来就较高，而且发现表的索引占用空间很大，所以考虑只给call_time和device_id列创建两个单列索引。</p>
+<p><strong>测试SQL</strong></p>
+<pre><code class="language-sql">SELECT
+    log.id, log.api,log.`device_id`,log.`device_type`, log.param, log.result, log.call_time, log.exec_time
+FROM
+    openapi_log_test log USE INDEX (idx_calltime_deviceid)
+WHERE
+    log.call_time &gt;= '2026-06-01 00:55:58.026' AND log.call_time &lt;= '2026-06-01 22:55:58.026'
+    AND log.device_id like '8OIzhN1Fi92z347Xh91GOaomVgEiWLlgefcLddMxq%'
+ORDER BY log.call_time DESC
+LIMIT 0, 10;
+
+SELECT
+    log.id, log.api,log.`device_id`,log.`device_type`, log.param, log.result, log.call_time, log.exec_time
+FROM
+    openapi_log_test log
+WHERE
+    log.call_time &gt;= '2026-06-01 00:55:58.026' AND log.call_time &lt;= '2026-06-01 22:55:58.026'
+    AND log.device_id like '8OIzhN1Fi92z347Xh91GOaomVgEiWLlgefcLddMxq%'
+ORDER BY log.call_time DESC
+LIMIT 0, 10;
+</code></pre>
+<p><strong>对比测试结果</strong></p>
+<p><strong>3使用了联合索引，4使用了device_id单列的索引</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250802595.png" alt="" loading="lazy"></p>
+<p><strong>联合索引</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250818889.png" alt="" loading="lazy"></p>
+<p><strong>单列索引</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250834178.png" alt="" loading="lazy"></p>
+<p><strong>结论</strong>：因call_time、device_id离散程度本来就较高，所以只从单列索引中便能获取较高的性能。从使用联合索引查询分析数据来看，联合索引较大，反而在读索引这一步花费了较多时间。</p>
+<h2 id="第二步-业务层面优化">第二步、业务层面优化</h2>
+<p>做的这些对SQL和表结构的优化，只能算锦上添花但是没有解决真正问题。从测试中可以发现如果查询的数据范围较小即使是3亿多条数据的这种大表查询起来也是很快的，但是当我们把查询的数据范围加大以后便会出现查询变慢甚至卡死的问题。</p>
+<p><strong>查询1，范围10个小时</strong></p>
+<pre><code class="language-sql">SELECT
+    log.id, log.api, log.param, log.result, log.call_time, log.exec_time, log.create_time, log.update_time
+FROM
+    openapi_log_test log
+WHERE
+    log.call_time &gt;= '2027-04-10 10:00:00.000' AND log.call_time &lt;= '2027-04-10 20:00:00.000'
+    And log.`api`='abc.xxx.xxx'
+    
+ORDER BY log.call_time DESC
+LIMIT 50, 500;  
+</code></pre>
+<p><strong>查询2，范围14个小时</strong></p>
+<pre><code class="language-sql">SELECT
+    log.id, log.api, log.param, log.result, log.call_time, log.exec_time, log.create_time, log.update_time
+FROM
+    openapi_log_test log
+WHERE
+    log.call_time &gt;= '2027-04-10 10:00:00.000' AND log.call_time &lt;= '2027-04-10 24:00:00.000'
+    And log.`api`='abc.xxx.xxx'
+    
+ORDER BY log.call_time DESC
+LIMIT 50, 500;  
+</code></pre>
+<p><strong>查询1和查询2时间消耗对比</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250853294.png" alt="" loading="lazy"></p>
+<p><strong>查询1具体消耗</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250860438.png" alt="" loading="lazy"></p>
+<p><strong>查询2具体消耗</strong><br>
+<img src="https://CCCLL.github.io/post-images/1708250867326.png" alt="" loading="lazy"></p>
+<p><strong>结论</strong>：通过对比可见，当查询范围超过一定临界值时（和内存大小有关），Sending data过程会做大量的Block_ops_in和Block_ops_out。Block_ops_in和Block_ops_out表示块存储设备输入和输出的次数，即从硬盘读取和写入数据的次数。因官方文档并未给出大量Block_ops_in和Block_ops_out原因的详细解释，结合上下文猜测是，因数据量大于内存可用量，会借助硬盘进行内存交换，因此产生大量的硬盘读取和写入。因此导致了查询时间变慢。</p>
+<p>因为当在控制台页面查询OpenAPI调用记录时，主要为了排障使用，所以需要查询特定的一条或几条，那么此场景下所需的时间范围就一定不会太大，所以可以<strong>限制查询数据的时间范围</strong>，从业务层面避免查询过慢的情况。</p>
+<h2 id="第三步-分表">第三步、分表</h2>
+<p>上文有提到有使用脚本定时删除此表的数据，只保留近一月的数据。但是这样会有一些副作用：</p>
+<ol>
+<li>数据删除会影响数据库性能，引发慢sql，多张表并行删除，数据库压力会更大。</li>
+<li>频繁删除数据，会产生数据库碎片，影响数据库性能，引发慢SQL。</li>
+</ol>
+<p>还有就是上文提到的限制查询数据范围来解决慢查询问题，只适合特定的业务场景。比如在我负责的产品中有个功能，根据前一天的数据，来生成日报展示。如果限制查询时间，那只能在代码层面分多次查询，较不合理。</p>
+<p>所以针对上述问题，针对大表可做分表。还以上文的OpenAPI调用记录表为例，按日期对表进行横向拆分，实现让系统每周生成一张周期表，表内只存近一周的数据，规避单表过大带来的风险。</p>
+<h3 id="分表方案选型">分表方案选型</h3>
+<p>经调研，考虑2种分表方案：ShardingSphere、利用Mybatis自带的拦截器特性。</p>
+<p>经过对比后，决定采用Mybatis拦截器来实现分表，原因如下：</p>
+<ol>
+<li>JAVA生态中很常用的分表框架是ShardingSphere，虽然功能强大，但需要一定的接入成本，并且很多功能暂时用不上。</li>
+<li>系统本身已经在使用Mybatis了，只需要添加一个mybaits拦截器，把SQL表名替换为新的周期表就可以了，没有接入新框架的成本，开发成本也不高。<br>
+<img src="https://CCCLL.github.io/post-images/1708251137474.png" alt="" loading="lazy"></li>
+</ol>
+<h3 id="实现代码">实现代码</h3>
+<p>详细代码以上传到Github：<a href="https://github.com/CCCLL/sharding-demo">https://github.com/CCCLL/sharding-demo</a></p>
+<p><strong>分表配置对象</strong></p>
+<pre><code class="language-java">import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDate;
+
+/**
+ * @Author: CCCLL
+ */
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class ShardingProperty {
+    // 分表周期天数
+    private Integer days;
+    // 分表开始日期，需要用这个日期计算周期表名
+    private LocalDate beginDate;
+    // 需要分表的表名
+    private String tableName;
+}
+</code></pre>
+<p><strong>分表配置类</strong></p>
+<pre><code class="language-java">import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * @Author: CCCLL
+ */
+public class ShardingPropertyConfig {
+
+    //此配置可存入数据库或配置中心
+    public static final ConcurrentHashMap&lt;String, ShardingProperty&gt; SHARDING_TABLE = new ConcurrentHashMap&lt;&gt;();
+
+    static {
+        ShardingProperty apiLogShardingProperty = new ShardingProperty(3, LocalDate.parse(&quot;20240201&quot;, DateTimeFormatter.ofPattern(&quot;yyyyMMdd&quot;)), &quot;openapi_log_test&quot;);
+        ShardingProperty ggaLogShardingProperty = new ShardingProperty(7, LocalDate.parse(&quot;20240101&quot;, DateTimeFormatter.ofPattern(&quot;yyyyMMdd&quot;)), &quot;gga_log&quot;);
+
+        SHARDING_TABLE.put(apiLogShardingProperty.getTableName(), apiLogShardingProperty);
+        SHARDING_TABLE.put(ggaLogShardingProperty.getTableName(), ggaLogShardingProperty);
+    }
+}
+</code></pre>
+<p><strong>Mapper</strong></p>
+<pre><code class="language-java">import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.example.sharding.Sharding;
+import org.example.sharding.ShardingRedundancy;
+
+import java.util.List;
+
+/**
+ * @Author: CCCLL
+ */
+@Mapper
+@Sharding
+public interface OpenApiLogMapper {
+
+    int bulkInsert(List&lt;OpenApiLog&gt; logs);
+
+    @ShardingRedundancy
+    int bulkInsertRedundancy(List&lt;OpenApiLog&gt; logs);
+
+    List&lt;OpenApiLog&gt; query(@Param(&quot;filter&quot;) OpenapiLogQuery filter);
+}
+</code></pre>
+<p><strong>MyBatis拦截器</strong></p>
+<pre><code class="language-java">import com.sun.istack.internal.NotNull;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.ibatis.executor.statement.StatementHandler;
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.plugin.*;
+import org.apache.ibatis.reflection.DefaultReflectorFactory;
+import org.apache.ibatis.reflection.MetaObject;
+import org.apache.ibatis.reflection.ReflectorFactory;
+import org.apache.ibatis.reflection.factory.DefaultObjectFactory;
+import org.apache.ibatis.reflection.factory.ObjectFactory;
+import org.apache.ibatis.reflection.wrapper.DefaultObjectWrapperFactory;
+import org.apache.ibatis.reflection.wrapper.ObjectWrapperFactory;
+import org.springframework.stereotype.Component;
+
+import java.lang.reflect.Method;
+import java.sql.Connection;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * @Author: CCCLL
+ */
+@Slf4j
+@Component
+@Intercepts({@Signature(type = StatementHandler.class, method = &quot;prepare&quot;, args = {Connection.class, Integer.class})})
+public class ShardingTableInterceptor implements Interceptor {
+    private static final ObjectFactory DEFAULT_OBJECT_FACTORY = new DefaultObjectFactory();
+    private static final ObjectWrapperFactory DEFAULT_OBJECT_WRAPPER_FACTORY = new DefaultObjectWrapperFactory();
+    private static final ReflectorFactory DEFAULT_REFLECTOR_FACTORY = new DefaultReflectorFactory();
+    private static final String MAPPED_STATEMENT = &quot;delegate.mappedStatement&quot;;
+
+    private static final String BOUND_SQL = &quot;delegate.boundSql&quot;;
+    private static final String ORIGIN_BOUND_SQL = &quot;delegate.boundSql.sql&quot;;
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern(&quot;yyyyMMdd&quot;);
+
+    private Pattern pattern = Pattern.compile(&quot;(from|into|update)[\\s]{1,}(\\w{1,})&quot;, Pattern.CASE_INSENSITIVE);
+
+
+    @Override
+    public Object intercept(Invocation invocation) throws Throwable {
+
+        StatementHandler statementHandler = (StatementHandler) invocation.getTarget();
+        MetaObject metaStatementHandler = MetaObject.forObject(statementHandler, DEFAULT_OBJECT_FACTORY, DEFAULT_OBJECT_WRAPPER_FACTORY, DEFAULT_REFLECTOR_FACTORY);
+        // 根据mapper的注解判断是否进行分表操作
+        MappedStatement mappedStatement = (MappedStatement) metaStatementHandler.getValue(MAPPED_STATEMENT);
+        String id = mappedStatement.getId();
+        String className = id.substring(0, id.lastIndexOf(&quot;.&quot;));
+        Class&lt;?&gt; clazz = Class.forName(className);
+        if (!clazz.isAnnotationPresent(Sharding.class)) {
+            return invocation.proceed();
+        }
+
+        // 获取SQL
+        BoundSql boundSql = (BoundSql) metaStatementHandler.getValue(BOUND_SQL);
+        String originSql = (String) metaStatementHandler.getValue(ORIGIN_BOUND_SQL);
+        if (StringUtils.isBlank(originSql)) {
+            return invocation.proceed();
+        }
+
+        // 获取表名
+        Matcher matcher = pattern.matcher(boundSql.getSql());
+        String tableName;
+        if (matcher.find()) {
+            tableName = matcher.group(2).trim();
+        } else {
+            return invocation.proceed();
+        }
+        ShardingProperty shardingProperty = ShardingPropertyConfig.SHARDING_TABLE.get(tableName);
+        if (shardingProperty == null) {
+            return invocation.proceed();
+        }
+
+        // 获取新表名
+        Method[] methods = clazz.getMethods();
+        String methodName = id.substring(id.lastIndexOf(&quot;.&quot;) + 1);
+        LocalDate tableNameDate = LocalDate.now();
+        for (Method method : methods) {
+            if (methodName.equals(method.getName())) {
+                if (method.isAnnotationPresent(ShardingRedundancy.class)) {
+                    tableNameDate = LocalDate.now().plusDays(shardingProperty.getDays());
+                }
+            }
+
+        }
+        String shardingTable = getCurrentShardingTable(shardingProperty, tableNameDate);
+        if (shardingTable == null) {
+            return invocation.proceed();
+        }
+
+        // 重构SQL，替换表名
+        String rebuildSql = boundSql.getSql().replace(shardingProperty.getTableName(), shardingTable);
+        metaStatementHandler.setValue(ORIGIN_BOUND_SQL, rebuildSql);
+        log.info(&quot;originSql:[{}], rebuildSql:[{}]&quot;, originSql, rebuildSql);
+        return invocation.proceed();
+    }
+
+    @Override
+    public Object plugin(Object target) {
+        if (target instanceof StatementHandler) {
+            return Plugin.wrap(target, this);
+        }
+        return target;
+    }
+
+    @Override
+    public void setProperties(Properties properties) {
+    }
+
+    public static String getCurrentShardingTable(@NotNull ShardingProperty shardingProperty, @NotNull LocalDate now) {
+        String tableName = shardingProperty.getTableName();
+        Integer days = shardingProperty.getDays();
+        LocalDate beginDate = shardingProperty.getBeginDate();
+
+
+        if (now.isBefore(beginDate)) {
+            return null;
+        }
+
+        LocalDate intervalStartDate = getIntervalStartDate(now, beginDate, days);
+        LocalDate intervalEndDate = intervalStartDate.plusDays(days - 1);
+        return tableName + &quot;_&quot; + intervalStartDate.format(FORMATTER) + &quot;_&quot; + intervalEndDate.format(FORMATTER);
+    }
+
+    public static LocalDate getIntervalStartDate(LocalDate targetDate, LocalDate startDate, int days) {
+        long daysBetween = ChronoUnit.DAYS.between(startDate, targetDate);
+        long interval = daysBetween / days;
+        return startDate.plusDays(interval * days);
+    }
+}
+</code></pre>
+<h3 id="临界点数据不连续问题">临界点数据不连续问题</h3>
+<p>分表方案有1个难点需要解决：<strong>周期临界点数据不连续</strong>。举例：假设要对openapi_log（OpenAPI调用记录表）大表进行横向分表，每周一张表，分表明细可看下面表格。</p>
+<table>
+<thead>
+<tr>
+<th>第一周（openapi_log_20240201_20240207）</th>
+<th>第二周（openapi_log_20240208_20240214）</th>
+<th>第三周（openapi_log_20240215_20240221）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2月1号～2月7号的数据</td>
+<td>2月8号～2月14号的数据</td>
+<td>2月15号～2月21号的数据</td>
+</tr>
+</tbody>
+</table>
+<p>2月8号就是分表临界点，8号需要切换到第二周的表，但8号0点刚切换的时候，表内没有任何数据，这时如果需要查近一天或最近几个小时的数据是查不到的。</p>
+<p>我决定采用数据冗余的方式来解决这个痛点。每个周期表都冗余一份上个周期的数据，用双倍数据量实现数据滑动的效果，效果见下面表格。</p>
+<table>
+<thead>
+<tr>
+<th>第一周（openapi_log_20240201_20240207）</th>
+<th>第二周（openapi_log_20240208_20240214）</th>
+<th>第三周（openapi_log_20240215_20240221）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1月25号～1月31号的数据</td>
+<td>2月1号～2月7号的数据</td>
+<td>2月8号～2月14号的数据</td>
+</tr>
+<tr>
+<td>2月1号～2月7号的数据</td>
+<td>2月8号～2月14号的数据</td>
+<td>2月15号～2月21号的数据</td>
+</tr>
+</tbody>
+</table>
+<p><strong>注：表格内第一行数据就是冗余的上个周期表的数据。</strong></p>
+<p>思路有了，接下来就要考虑怎么实现<strong>双写（数据冗余到下个周期表）</strong>，较为简单的方案是执行两次SQL，但是要注意在MyBatis拦截器替换表名时需做区分。此方案实现简单，成本小。但是因为是串行的执行了两次SQL，有一定性能损耗。第二种方案是监听增量binlog，可以使用cannal，性能较好。</p>
+
+              </div>
+              <div class="toc-container">
+                <ul class="markdownIt-TOC">
+<li>
+<ul>
+<li><a href="#%E7%AC%AC%E4%B8%80%E6%AD%A5-sql%E5%92%8C%E8%A1%A8%E7%BB%93%E6%9E%84%E4%BC%98%E5%8C%96">第一步、SQL和表结构优化</a>
+<ul>
+<li><a href="#sql%E4%BC%98%E5%8C%96">SQL优化</a></li>
+<li><a href="#%E8%A1%A8%E7%BB%93%E6%9E%84%E4%BC%98%E5%8C%96">表结构优化</a></li>
+</ul>
+</li>
+<li><a href="#%E7%AC%AC%E4%BA%8C%E6%AD%A5-%E4%B8%9A%E5%8A%A1%E5%B1%82%E9%9D%A2%E4%BC%98%E5%8C%96">第二步、业务层面优化</a></li>
+<li><a href="#%E7%AC%AC%E4%B8%89%E6%AD%A5-%E5%88%86%E8%A1%A8">第三步、分表</a>
+<ul>
+<li><a href="#%E5%88%86%E8%A1%A8%E6%96%B9%E6%A1%88%E9%80%89%E5%9E%8B">分表方案选型</a></li>
+<li><a href="#%E5%AE%9E%E7%8E%B0%E4%BB%A3%E7%A0%81">实现代码</a></li>
+<li><a href="#%E4%B8%B4%E7%95%8C%E7%82%B9%E6%95%B0%E6%8D%AE%E4%B8%8D%E8%BF%9E%E7%BB%AD%E9%97%AE%E9%A2%98">临界点数据不连续问题</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+              </div>
+            </div>
+          </article>
+        </div>
+
+        
+          <div class="next-post">
+            <div class="next">下一篇</div>
+            <a href="https://CCCLL.github.io/post/shi-yong-jprofiler-pai-cha-cheng-xu-wen-ti-shi-jian/">
+              <h3 class="post-title">
+                使用JProfiler排查程序问题实践
+              </h3>
+            </a>
+          </div>
+        
+
+        
+
+        <div class="site-footer">
+  
+  <a class="rss" href="https://CCCLL.github.io/atom.xml" target="_blank">
+    <i class="ri-rss-line"></i> RSS
+  </a>
+</div>
+
+      </div>
+    </div>
+
+    <script>
+      hljs.initHighlightingOnLoad()
+
+      let mainNavLinks = document.querySelectorAll(".markdownIt-TOC a");
+
+      // This should probably be throttled.
+      // Especially because it triggers during smooth scrolling.
+      // https://lodash.com/docs/4.17.10#throttle
+      // You could do like...
+      // window.addEventListener("scroll", () => {
+      //    _.throttle(doThatStuff, 100);
+      // });
+      // Only not doing it here to keep this Pen dependency-free.
+
+      window.addEventListener("scroll", event => {
+        let fromTop = window.scrollY;
+
+        mainNavLinks.forEach((link, index) => {
+          let section = document.getElementById(decodeURI(link.hash).substring(1));
+          let nextSection = null
+          if (mainNavLinks[index + 1]) {
+            nextSection = document.getElementById(decodeURI(mainNavLinks[index + 1].hash).substring(1));
+          }
+          if (section.offsetTop <= fromTop) {
+            if (nextSection) {
+              if (nextSection.offsetTop > fromTop) {
+                link.classList.add("current");
+              } else {
+                link.classList.remove("current");    
+              }
+            } else {
+              link.classList.add("current");
+            }
+          } else {
+            link.classList.remove("current");
+          }
+        });
+      });
+
+    </script>
+  </body>
+</html>
